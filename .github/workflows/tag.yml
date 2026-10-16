@@ -1,0 +1,48 @@
+# Every push to main that passes vet and tests gets the next patch tag
+# (v0.1.0 when there is none yet), so Go consumers can pin it straight away.
+# A commit that already carries a tag is left alone.
+name: tag
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Two quick pushes must not both read the same "last tag" and collide.
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - run: go vet ./...
+      - run: go test -race ./...
+
+      - name: Tag next patch version
+        run: |
+          if git describe --exact-match --tags --match 'v*' HEAD >/dev/null 2>&1; then
+            echo "HEAD is already tagged"
+            exit 0
+          fi
+          last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$last" ]; then
+            next=v0.1.0
+          else
+            IFS=. read -r major minor patch <<<"${last#v}"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
+          git tag "$next"
+          git push origin "$next"
+          echo "Tagged $next" >> "$GITHUB_STEP_SUMMARY"
